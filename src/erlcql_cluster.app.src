@@ -1,0 +1,8 @@
+{application, erlcql_cluster, [
+ {description, "Pool of pools of erlcql connections to separate cassandra cluster nodes"},
+ {vsn, "0.1.0"},
+ {applications, [stdlib, kernel, erlcql, erlcql_poolboy]},
+ {registered, []},
+ {mod, {erlcql_cluster_app, []}},
+ {env, []}
+]}.
