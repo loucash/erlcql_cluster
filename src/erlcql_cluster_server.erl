@@ -111,9 +111,11 @@ pool_options(Options) ->
 
 erlcql_options(Host, Port, Options) ->
     Keyspace   = proplists:get_value(use, Options),
+    Statements = proplists:get_value(prepare, Options),
     [{host, Host},
      {port, Port},
      {use, Keyspace},
      {keepalive, true},
      {cql_version, <<"3.1.1">>},
-     {auto_reconnect, true}].
+     {auto_reconnect, true},
+     {prepare, Statements}].
