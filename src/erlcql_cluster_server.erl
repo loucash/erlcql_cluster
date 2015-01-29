@@ -16,13 +16,8 @@
          terminate/2,
          code_change/3]).
 
--record(pool, {
-          name      :: atom(),
-          nodes     :: [atom()]
-         }).
-
 -record(state, {
-          pools = []        :: [#pool{}]
+          dispatch_table    :: ets:tid()
          }).
 
 %%%===================================================================
@@ -36,33 +31,30 @@ new(Name, Opts) ->
     gen_server:call(?MODULE, {new, Name, Opts}).
 
 checkout(Name) ->
-    gen_server:call(?MODULE, {checkout, Name}).
+    random:seed(now()),
+    {_, NodePools} = pool_find(Name),
+    NodePool = lists:nth(random:uniform(length(NodePools)), NodePools),
+    Worker = poolboy:checkout(NodePool),
+    {ok, {NodePool, Worker}}.
 
-checkin(Resource) ->
-    gen_server:call(?MODULE, {checkin, Resource}).
+checkin({NodePool, Worker}) ->
+    poolboy:checkin(NodePool, Worker).
 
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
 
 init([]) ->
-    random:seed(now()),
-    {ok, #state{}}.
+    DTid = ets:new(?MODULE, [named_table, public, {read_concurrency, true}]),
+    {ok, #state{dispatch_table=DTid}}.
 
-handle_call({checkin, {NodePool, Worker}}, _From, State) ->
-    Reply = poolboy:checkin(NodePool, Worker),
-    {reply, Reply, State};
-handle_call({checkout, Name}, _From, #state{pools=Pools}=State) ->
-    #pool{nodes=NodePools} = lists:keyfind(Name, #pool.name, Pools),
-    NodePool = lists:nth(random:uniform(length(NodePools)), NodePools),
-    Worker = poolboy:checkout(NodePool),
-    {reply, {ok, {NodePool, Worker}}, State};
-handle_call({new, Name, Options}, _From, #state{pools=Pools}=State) ->
-    case already_exists(Name, Pools) of
+handle_call({new, Name, Options}, _From, #state{}=State) ->
+    case already_exists(Name) of
         true ->
             {reply, {error, already_started}, State};
         false ->
-            {reply, ok, State#state{pools=pool_new(Name, Options, Pools)}}
+            true = pool_new(Name, Options),
+            {reply, ok, State#state{}}
     end.
 
 handle_cast(_Msg, State) ->
@@ -80,13 +72,19 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-already_exists(Name, Pools) ->
-    lists:keymember(Name, #pool.name, Pools).
+already_exists(Name) ->
+    case ets:lookup(?MODULE, Name) of
+        [] -> false;
+        _  -> true
+    end.
 
-pool_new(Name, Options, Pools) ->
-    NewPool = #pool{name=Name},
+pool_find(Name) ->
+    [PoolInfo] = ets:lookup(?MODULE, Name),
+    PoolInfo.
+
+pool_new(Name, Options) ->
     Nodes = proplists:get_value(nodes, Options),
-    [NewPool#pool{nodes=pool_new_per_node(Name, Nodes, Options)}|Pools].
+    ets:insert(?MODULE, {Name, pool_new_per_node(Name, Nodes, Options)}).
 
 pool_new_per_node(Name, Nodes, Options) ->
     pool_new_per_node(Name, Nodes, Options, []).
